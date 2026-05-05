@@ -1,0 +1,20 @@
+{
+  "short_name": "JokerAI",
+  "name": "Joker Assistant AI",
+  "icons": [
+    {
+      "src": "/joker.jpg",
+      "type": "image/jpeg",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/joker.jpg",
+      "type": "image/jpeg",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1a1a1a",
+  "background_color": "#1a1a1a"
+}

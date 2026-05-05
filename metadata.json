@@ -1,0 +1,12 @@
+{
+  "name": "Joker Assistant AI",
+  "description": "Un assistant imprévisible et chaotique propulsé par Gemini. Fiable pour vos recherches, mais avec le ton unique du Joker.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "Text-to-Speech",
+    "Speech-to-Text",
+    "AI Chat"
+  ]
+}
