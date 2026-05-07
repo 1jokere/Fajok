@@ -3,13 +3,13 @@
   "name": "Joker Assistant AI",
   "icons": [
     {
-      "src": "/joker.jpg",
-      "type": "image/jpeg",
+      "src": "https://i.ibb.co/SDb3KhJS/file-00000000bc08720c8e01d6949bca16d4.png",
+      "type": "image/png",
       "sizes": "192x192"
     },
     {
-      "src": "/joker.jpg",
-      "type": "image/jpeg",
+      "src": "https://i.ibb.co/SDb3KhJS/file-00000000bc08720c8e01d6949bca16d4.png",
+      "type": "image/png",
       "sizes": "512x512"
     }
   ],

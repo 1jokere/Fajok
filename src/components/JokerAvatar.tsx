@@ -24,7 +24,7 @@ export default function JokerAvatar({ isTyping, isSpeaking }: JokerAvatarProps) 
       {/* Main Avatar Container - STEADY */}
       <div className="relative z-10 w-full h-full rounded-full overflow-hidden border-4 border-green-500/30 shadow-[0_0_50px_rgba(0,0,0,0.5)] bg-black">
         <motion.img 
-          src="https://images.unsplash.com/photo-1509248961158-e54f6934749c?auto=format&fit=crop&q=80&w=1000"
+          src="https://i.ibb.co/SDb3KhJS/file-00000000bc08720c8e01d6949bca16d4.png" 
           alt="Joker"
           className="w-full h-full object-cover contrast-125"
           animate={{
@@ -39,7 +39,11 @@ export default function JokerAvatar({ isTyping, isSpeaking }: JokerAvatarProps) 
             ease: "easeInOut"
           }}
           onError={(e) => {
-            (e.target as HTMLImageElement).src = 'https://m.media-amazon.com/images/M/MV5BMjA1MDU3OTQ4OF5BMl5BanBnXkFtZTgwNTM5NjE5OTE@._V1_.jpg';
+            const target = e.target as HTMLImageElement;
+            // Catch repeated link failures
+            if (target.src.includes('ibb.co')) {
+               target.src = 'https://images.unsplash.com/photo-1509248961158-e54f6934749c?auto=format&fit=crop&q=80&w=1000';
+            }
           }}
         />
         
