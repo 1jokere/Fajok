@@ -154,6 +154,7 @@ export default function ChatInterface() {
       utteranceRef.current = null;
     }
     setIsSpeaking(false);
+    setIsTyping(false); // Permet d'arrêter aussi l'état "réflexion"
   };
 
   const handleSend = async (text: string = input) => {
@@ -437,7 +438,7 @@ export default function ChatInterface() {
         <div className="flex gap-4 items-end">
           <div className="relative group">
             <AnimatePresence>
-              {isSpeaking && (
+              {(isSpeaking || isTyping) && (
                 <motion.button
                   initial={{ opacity: 0, y: 0, x: '-50%' }}
                   animate={{ opacity: 1, y: -70, x: '-50%' }}
