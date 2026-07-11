@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, Mic, MicOff, Volume2, VolumeX, Ghost, Laugh, Square, Settings, X, SlidersHorizontal } from 'lucide-react';
+import { Send, Mic, MicOff, Volume2, VolumeX, Ghost, Laugh, Square, Settings, X, SlidersHorizontal, Trash2 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { chatWithJoker, ChatMessage } from '../services/geminiService';
 import JokerAvatar from './JokerAvatar';
@@ -33,12 +33,12 @@ export default function ChatInterface() {
       timestamp: new Date() 
     }];
   });
-  const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   // Audio settings
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -46,7 +46,6 @@ export default function ChatInterface() {
   const [pitch, setPitch] = useState(() => parseFloat(localStorage.getItem('joker_pitch') || '0.8'));
   const [rate, setRate] = useState(() => parseFloat(localStorage.getItem('joker_rate') || '1'));
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-  
   const scrollRef = useRef<HTMLDivElement>(null);
   
   // Save messages to localStorage
@@ -66,12 +65,15 @@ export default function ChatInterface() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      // Nettoyage au démarrage pour éviter les blocages
       window.speechSynthesis.cancel();
       
       const loadVoices = () => {
-        const availableVoices = window.speechSynthesis.getVoices();
-        // Filtrer les voix françaises en priorité
+        let availableVoices = window.speechSynthesis.getVoices();
+        if (availableVoices.length === 0) {
+          setTimeout(loadVoices, 100);
+          return;
+        }
+
         const filteredVoices = availableVoices.sort((a, b) => {
           if (a.lang.startsWith('fr') && !b.lang.startsWith('fr')) return -1;
           if (!a.lang.startsWith('fr') && b.lang.startsWith('fr')) return 1;
@@ -79,15 +81,20 @@ export default function ChatInterface() {
         });
         setVoices(filteredVoices);
         
-        // Sélectionner par défaut la première voix FR si rien n'est choisi
-        if (!selectedVoice) {
+        const currentVoiceExists = selectedVoice && availableVoices.some(v => v.name === selectedVoice);
+        if (!currentVoiceExists) {
           const fr = filteredVoices.find(v => v.lang.startsWith('fr'));
-          if (fr) setSelectedVoice(fr.name);
+          if (fr) {
+            setSelectedVoice(fr.name);
+            localStorage.setItem('joker_voice', fr.name);
+          }
         }
       };
 
       loadVoices();
-      window.speechSynthesis.onvoiceschanged = loadVoices;
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+      }
 
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
@@ -108,56 +115,86 @@ export default function ChatInterface() {
     }
   }, []);
 
-  const handleSpeech = (text: string) => {
-    if (isMuted) return;
-    
-    // Arrêter toute parole en cours proprement
-    stopSpeech();
-    
-    // Nettoyer les astérisques pour éviter qu'ils ne soient prononcés
-    const cleanText = text.replace(/\*/g, '');
-    
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utteranceRef.current = utterance;
-    
-    if (selectedVoice) {
-      const voice = voices.find(v => v.name === selectedVoice);
-      if (voice) utterance.voice = voice;
-    }
-    
-    utterance.pitch = pitch;
-    utterance.rate = rate;
-    
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      utteranceRef.current = null;
-    };
-    utterance.onerror = () => {
-      setIsSpeaking(false);
-      utteranceRef.current = null;
-    };
-    
-    // Hack pour certains navigateurs qui mettent la synthèse en pause
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
-    }
-    window.speechSynthesis.speak(utterance);
-  };
-
-  const stopSpeech = () => {
+  const refreshVoices = React.useCallback(() => {
     window.speechSynthesis.cancel();
-    if (utteranceRef.current) {
-      utteranceRef.current.onstart = null;
-      utteranceRef.current.onend = null;
-      utteranceRef.current.onerror = null;
-      utteranceRef.current = null;
-    }
-    setIsSpeaking(false);
-    setIsTyping(false); // Permet d'arrêter aussi l'état "réflexion"
-  };
+    const availableVoices = window.speechSynthesis.getVoices();
+    setVoices(availableVoices.sort((a, b) => {
+      if (a.lang.startsWith('fr') && !b.lang.startsWith('fr')) return -1;
+      if (!a.lang.startsWith('fr') && b.lang.startsWith('fr')) return 1;
+      return 0;
+    }));
+  }, []);
 
-  const handleSend = async (text: string = input) => {
+  const stopSpeech = React.useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.speechSynthesis.cancel();
+      (window as any).lastJokerRequest = 0;
+    } catch (e) {
+      console.error("Cancel Speech Error:", e);
+    }
+    
+    setIsSpeaking(false);
+    utteranceRef.current = null;
+  }, []);
+
+  const handleSpeech = React.useCallback((text: string) => {
+    if (isMuted || typeof window === 'undefined' || !window.speechSynthesis) return;
+    
+    // Arrêter toute parole en cours
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+    
+    // Nettoyer les caractères spéciaux markdown
+    const cleanText = text.replace(/[*_#`~]/g, '').trim();
+    if (!cleanText) return;
+
+    // Petit délai pour laisser le temps au moteur de s'annuler proprement
+    setTimeout(() => {
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utteranceRef.current = utterance;
+      
+      const currentVoices = window.speechSynthesis.getVoices();
+      let voice = currentVoices.find(v => v.name === selectedVoice);
+      
+      if (!voice) {
+        voice = currentVoices.find(v => v.lang.startsWith('fr'));
+      }
+
+      if (voice) {
+        utterance.voice = voice;
+        utterance.lang = voice.lang;
+      } else {
+        utterance.lang = 'fr-FR';
+      }
+      
+      utterance.pitch = pitch;
+      utterance.rate = rate;
+      utterance.volume = 1;
+      
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => {
+        setIsSpeaking(true); // Petit hack pour être sûr que l'état change
+        setTimeout(() => setIsSpeaking(false), 10);
+        utteranceRef.current = null;
+      };
+      utterance.onerror = (e) => {
+        console.error("Speech Error:", e);
+        setIsSpeaking(false);
+        utteranceRef.current = null;
+      };
+      
+      // Lancer la lecture
+      window.speechSynthesis.speak(utterance);
+      
+      // Hack pour Chrome qui se met parfois en pause tout seul
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+    }, 100);
+  }, [isMuted, selectedVoice, pitch, rate]);
+
+  const handleSend = React.useCallback(async (text: string) => {
     if (!text.trim() || isTyping) return;
 
     const userMessage: Message = {
@@ -168,49 +205,63 @@ export default function ChatInterface() {
     };
 
     setMessages(prev => [...prev, userMessage]);
-    setInput('');
     setIsTyping(true);
 
+    const requestId = Date.now();
+    (window as any).lastJokerRequest = requestId;
+
     try {
-      // Prepare history for Gemini
       const history: ChatMessage[] = messages.slice(-20).map(m => ({
         role: m.role,
         parts: [{ text: m.text }]
       }));
 
-      const response = await chatWithJoker(history, text);
+      const responsePromise = chatWithJoker(history, text);
+      const timeoutPromise = new Promise<string>((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), 60000)
+      );
+
+      const response = await Promise.race([responsePromise, timeoutPromise]);
       
+      if ((window as any).lastJokerRequest !== requestId) return;
+
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: response,
+        text: response as string,
         timestamp: new Date(),
       };
 
       setMessages(prev => [...prev, botMessage]);
-      handleSpeech(response);
+      handleSpeech(botMessage.text);
     } catch (error) {
+      if ((window as any).lastJokerRequest !== requestId) return;
+      
       console.error("Chat Error:", error);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: "Même mon génie a ses limites... ou alors c'est ton réseau qui flanche ! Ha ha ha !",
+        text: error instanceof Error && error.message === 'TIMEOUT' 
+          ? "Je fouillais dans les archives du monde... mais c'est si vaste et si ennuyeux ! Pose une autre question, celle-ci commençait à me donner mal au crâne. Ha ha ha !"
+          : "Même mon génie a ses limites... ou alors c'est ton réseau qui flanche ! Ha ha ha !",
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
-      setIsTyping(false);
+      if ((window as any).lastJokerRequest === requestId) {
+        setIsTyping(false);
+      }
     }
-  };
+  }, [isTyping, messages, handleSpeech]);
 
-  const toggleListening = () => {
+  const toggleListening = React.useCallback(() => {
     if (isListening) {
       recognitionRef.current?.stop();
     } else {
       setIsListening(true);
       recognitionRef.current?.start();
     }
-  };
+  }, [isListening]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -232,6 +283,13 @@ export default function ChatInterface() {
           </div>
         </div>
         <div className="flex gap-4">
+          <button 
+            onClick={() => setShowDeleteConfirm(true)}
+            className="p-2 hover:bg-red-500/10 rounded-full transition-colors text-red-400/60 hover:text-red-400"
+            title="Effacer tout"
+          >
+            <Trash2 size={20} />
+          </button>
           <button 
             onClick={() => setShowSettings(true)}
             className="p-2 hover:bg-white/10 rounded-full transition-colors text-purple-400"
@@ -271,17 +329,7 @@ export default function ChatInterface() {
                 </div>
                 <div className="flex gap-2">
                   <button 
-                    onClick={() => {
-                      if (confirm('Voulez-vous vraiment effacer la mémoire du Joker ?')) {
-                        localStorage.removeItem('joker_messages');
-                        setMessages([{ 
-                          id: 'welcome-' + Date.now(),
-                          role: 'model', 
-                          text: 'Mémoire effacée... Comme une ardoise propre prête à être ensanglantée !',
-                          timestamp: new Date()
-                        }]);
-                      }
-                    }}
+                    onClick={() => setShowDeleteConfirm(true)}
                     className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 text-[10px] font-mono rounded-xl border border-red-500/20 transition-all uppercase tracking-tighter"
                     title="Effacer l'historique"
                   >
@@ -299,18 +347,31 @@ export default function ChatInterface() {
               <div className="space-y-6">
                 {/* Voice Selection */}
                 <div>
-                  <label className="block text-xs font-mono text-purple-400 mb-2 uppercase tracking-tighter">Voix Disponible</label>
+                  <div className="flex justify-between mb-2">
+                    <label className="block text-xs font-mono text-purple-400 uppercase tracking-tighter">Voix Disponible</label>
+                    <button 
+                      onClick={refreshVoices}
+                      className="text-[10px] text-green-400 hover:underline uppercase font-mono"
+                    >
+                      Actualiser
+                    </button>
+                  </div>
                   <select 
                     value={selectedVoice || ''}
                     onChange={(e) => setSelectedVoice(e.target.value)}
-                    className="w-full bg-black border border-purple-500/20 rounded-xl px-4 py-2 text-white focus:border-green-500/50 outline-none"
+                    className="w-full bg-black border border-purple-500/20 rounded-xl px-4 py-2 text-white focus:border-green-500/50 outline-none mb-1"
                   >
-                    {voices.map(voice => (
-                      <option key={voice.name} value={voice.name}>
-                        {voice.name} ({voice.lang})
-                      </option>
-                    ))}
+                    {voices.length === 0 ? (
+                      <option>Chargement des voix...</option>
+                    ) : (
+                      voices.map(voice => (
+                        <option key={voice.name} value={voice.name}>
+                          {voice.name} ({voice.lang})
+                        </option>
+                      ))
+                    )}
                   </select>
+                  <p className="text-[9px] text-purple-400/40 font-mono italic">Certaines voix dépendent de ton navigateur et système.</p>
                 </div>
 
                 {/* Pitch Slider */}
@@ -366,6 +427,66 @@ export default function ChatInterface() {
         )}
       </AnimatePresence>
 
+      {/* Custom Delete Confirmation Modal */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="w-full max-w-md bg-zinc-950 border border-red-500/50 rounded-3xl p-6 shadow-[0_0_50px_rgba(239,68,68,0.3)] text-center relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-red-500 to-transparent"></div>
+              
+              <div className="flex flex-col items-center gap-4 my-4">
+                <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center border-2 border-red-500 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.4)]">
+                  <Trash2 className="text-red-500" size={32} />
+                </div>
+                
+                <h3 className="text-2xl font-display text-red-500 uppercase tracking-widest mt-2 font-black">DÉTRUIRE LE CHAOS ?</h3>
+                
+                <p className="text-sm text-zinc-300 leading-relaxed font-sans px-2">
+                  Tu veux vraiment effacer toute notre discussion ? Tout ce magnifique bazar, nos rires, nos blagues... s'évaporeront dans le néant ! Es-tu sûr de faire le bon choix, petit farceur ? Ha ha ha !
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    stopSpeech();
+                    localStorage.removeItem('joker_messages');
+                    setMessages([{ 
+                      id: 'welcome-' + Date.now(),
+                      role: 'model', 
+                      text: 'Mémoire effacée ! Un nouveau terrain de jeu vierge... prêt pour de nouvelles bêtises ! Ha ha ha !',
+                      timestamp: new Date()
+                    }]);
+                    setShowDeleteConfirm(false);
+                    setShowSettings(false);
+                  }}
+                  className="w-full py-3.5 bg-red-600 hover:bg-red-500 active:scale-[0.98] rounded-xl text-black font-mono font-bold text-sm tracking-wider transition-all shadow-[0_4px_20px_rgba(239,68,68,0.4)] hover:shadow-[0_4px_30px_rgba(239,68,68,0.6)] cursor-pointer"
+                >
+                  OUI, EFFACER TOUT !
+                </button>
+                
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="w-full py-3 bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] border border-purple-500/20 text-purple-400 font-mono text-xs tracking-wide rounded-xl transition-all cursor-pointer"
+                >
+                  NON, RETOUR AU JEU !
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Chat Area */}
       <div 
         ref={scrollRef}
@@ -383,38 +504,11 @@ export default function ChatInterface() {
         
         <AnimatePresence initial={false}>
           {messages.map((message) => (
-            <motion.div
-              key={message.id}
-              initial={{ opacity: 0, y: 10, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.3 }}
-              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div className={`max-w-[80%] rounded-2xl p-4 relative group ${
-                message.role === 'user' 
-                  ? 'bg-purple-900/40 border border-purple-500/30 text-white rounded-br-none' 
-                  : 'bg-green-900/20 border border-green-500/20 text-green-50 text-base leading-relaxed rounded-bl-none shadow-[0_0_20px_rgba(0,0,0,0.2)]'
-              }`}>
-                <div className="markdown-body">
-                  <Markdown>{message.text}</Markdown>
-                </div>
-                <div className={`mt-2 flex items-center gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-between'}`}>
-                  {message.role === 'model' && (
-                    <button
-                      onClick={() => handleSpeech(message.text)}
-                      className="flex items-center gap-1.5 p-1.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 rounded-lg text-green-400 transition-all active:scale-95 z-20"
-                      title="Réécouter"
-                    >
-                      <Volume2 size={14} />
-                      <span className="text-[10px] font-mono leading-none tracking-wider">RÉPÉTER</span>
-                    </button>
-                  )}
-                  <div className={`text-[10px] font-mono opacity-40 uppercase ${message.role === 'user' ? 'text-right' : ''}`}>
-                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
+            <MessageItem 
+              key={message.id} 
+              message={message} 
+              onSpeech={handleSpeech} 
+            />
           ))}
         </AnimatePresence>
 
@@ -434,71 +528,144 @@ export default function ChatInterface() {
       </div>
 
       {/* Input Area */}
-      <footer className="p-6 bg-black/60 backdrop-blur-xl border-t border-purple-900/50">
-        <div className="flex gap-4 items-end">
-          <div className="relative group">
-            <AnimatePresence>
-              {(isSpeaking || isTyping) && (
-                <motion.button
-                  initial={{ opacity: 0, y: 0, x: '-50%' }}
-                  animate={{ opacity: 1, y: -70, x: '-50%' }}
-                  exit={{ opacity: 0, y: 0, x: '-50%' }}
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    stopSpeech();
-                  }}
-                  className="absolute left-1/2 p-4 bg-red-600 text-white rounded-full shadow-[0_0_30px_rgba(255,0,0,0.6)] z-[60] border-2 border-white/20 flex items-center justify-center"
-                  title="LA FERME JOKER !"
-                >
-                  <Square size={20} fill="currentColor" />
-                  <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-red-600 text-[10px] px-2 py-1 rounded font-bold whitespace-nowrap shadow-lg">STOP !</span>
-                </motion.button>
-              )}
-            </AnimatePresence>
-            
-            <button
-              onClick={toggleListening}
-              className={`p-4 rounded-xl transition-all relative z-10 ${
-                isListening 
-                  ? 'bg-red-600 shadow-[0_0_20px_rgba(255,0,0,0.5)] scale-110' 
-                  : 'bg-purple-900/40 hover:bg-purple-700/50 text-purple-400'
-              }`}
-            >
-              {isListening ? <MicOff size={24} /> : <Mic size={24} />}
-            </button>
-          </div>
-          
-          <div className="flex-1 relative">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="Écris ton défi ici..."
-              className="w-full bg-white/5 border border-purple-500/20 rounded-xl px-4 py-3 text-white placeholder-purple-400/50 focus:outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/20 transition-all resize-none min-h-[50px] max-h-[150px] font-sans"
-              rows={1}
-            />
-          </div>
-
-          <button
-            onClick={() => handleSend()}
-            disabled={!input.trim() || isTyping}
-            className="p-4 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-black transition-all shadow-[0_4px_15px_rgba(0,255,0,0.3)] hover:shadow-[0_4px_25px_rgba(0,255,0,0.5)] active:scale-95"
-          >
-            <Send size={24} />
-          </button>
-        </div>
-        <p className="mt-4 text-center text-[10px] font-mono text-purple-500/50 uppercase tracking-[0.2em]">
-          Une blague par jour éloigne la santé mentale pour toujours.
-        </p>
-      </footer>
+      <ChatInput 
+        onSend={handleSend} 
+        isTyping={isTyping} 
+        isListening={isListening} 
+        toggleListening={toggleListening} 
+        isSpeaking={isSpeaking} 
+        stopSpeech={stopSpeech} 
+      />
     </div>
   );
 }
+
+// --- SUB-COMPONENTS TO FIX PERFORMANCE ---
+
+const MessageItem = React.memo(({ message, onSpeech }: { message: Message, onSpeech: (text: string) => void }) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.3 }}
+      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+    >
+      <div className={`max-w-[80%] rounded-2xl p-4 relative group ${
+        message.role === 'user' 
+          ? 'bg-purple-900/40 border border-purple-500/30 text-white rounded-br-none' 
+          : 'bg-green-900/20 border border-green-500/20 text-green-50 text-base leading-relaxed rounded-bl-none shadow-[0_0_20px_rgba(0,0,0,0.2)]'
+      }`}>
+        <div className="markdown-body">
+          <Markdown>{message.text}</Markdown>
+        </div>
+        <div className={`mt-2 flex items-center gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-between'}`}>
+          {message.role === 'model' && (
+            <button
+              onClick={() => onSpeech(message.text)}
+              className="flex items-center gap-1.5 p-1.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 rounded-lg text-green-400 transition-all active:scale-95 z-20"
+              title="Réécouter"
+            >
+              <Volume2 size={14} />
+              <span className="text-[10px] font-mono leading-none tracking-wider">RÉPÉTER</span>
+            </button>
+          )}
+          <div className={`text-[10px] font-mono opacity-40 uppercase ${message.role === 'user' ? 'text-right' : ''}`}>
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+});
+
+const ChatInput = React.memo(({ 
+  onSend, 
+  isTyping, 
+  isListening, 
+  toggleListening, 
+  isSpeaking, 
+  stopSpeech 
+}: { 
+  onSend: (text: string) => void, 
+  isTyping: boolean,
+  isListening: boolean,
+  toggleListening: () => void,
+  isSpeaking: boolean,
+  stopSpeech: () => void
+}) => {
+  const [localInput, setLocalInput] = useState('');
+
+  const handleInternalSend = () => {
+    if (!localInput.trim() || isTyping) return;
+    onSend(localInput);
+    setLocalInput('');
+  };
+
+  return (
+    <footer className="p-6 bg-black/60 backdrop-blur-xl border-t border-purple-900/50">
+      <div className="flex gap-4 items-end">
+        <div className="relative group">
+          <AnimatePresence>
+            {(isSpeaking || isTyping) && (
+              <motion.button
+                initial={{ opacity: 0, y: 0, x: '-50%' }}
+                animate={{ opacity: 1, y: -70, x: '-50%' }}
+                exit={{ opacity: 0, y: 0, x: '-50%' }}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  stopSpeech();
+                }}
+                className="absolute left-1/2 p-4 bg-red-600 text-white rounded-full shadow-[0_0_30px_rgba(255,0,0,0.6)] z-[60] border-2 border-white/20 flex items-center justify-center"
+                title="LA FERME JOKER !"
+              >
+                <Square size={20} fill="currentColor" />
+                <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-red-600 text-[10px] px-2 py-1 rounded font-bold whitespace-nowrap shadow-lg">STOP !</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
+          
+          <button
+            onClick={toggleListening}
+            className={`p-4 rounded-xl transition-all relative z-10 ${
+              isListening 
+                ? 'bg-red-600 shadow-[0_0_20px_rgba(255,0,0,0.5)] scale-110' 
+                : 'bg-purple-900/40 hover:bg-purple-700/50 text-purple-400'
+            }`}
+          >
+            {isListening ? <MicOff size={24} /> : <Mic size={24} />}
+          </button>
+        </div>
+        
+        <div className="flex-1 relative">
+          <textarea
+            value={localInput}
+            onChange={(e) => setLocalInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleInternalSend();
+              }
+            }}
+            placeholder="Écris ton défi ici..."
+            className="w-full bg-white/5 border border-purple-500/20 rounded-xl px-4 py-3 text-white placeholder-purple-400/50 focus:outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/20 transition-all resize-none min-h-[50px] max-h-[150px] font-sans"
+            rows={1}
+          />
+        </div>
+
+        <button
+          onClick={handleInternalSend}
+          disabled={!localInput.trim() || isTyping}
+          className="p-4 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-black transition-all shadow-[0_4px_15px_rgba(0,255,0,0.3)] hover:shadow-[0_4px_25px_rgba(0,255,0,0.5)] active:scale-95"
+        >
+          <Send size={24} />
+        </button>
+      </div>
+      <p className="mt-4 text-center text-[10px] font-mono text-purple-500/50 uppercase tracking-[0.2em]">
+        Une blague par jour éloigne la santé mentale pour toujours.
+      </p>
+    </footer>
+  );
+});
