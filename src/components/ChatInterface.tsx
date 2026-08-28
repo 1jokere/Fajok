@@ -172,12 +172,15 @@ export default function ChatInterface() {
       utterance.rate = rate;
       utterance.volume = 1;
       
-      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+      };
+
       utterance.onend = () => {
-        setIsSpeaking(true); // Petit hack pour être sûr que l'état change
-        setTimeout(() => setIsSpeaking(false), 10);
+        setIsSpeaking(false);
         utteranceRef.current = null;
       };
+
       utterance.onerror = (e) => {
         console.error("Speech Error:", e);
         setIsSpeaking(false);
@@ -191,7 +194,7 @@ export default function ChatInterface() {
       if (window.speechSynthesis.paused) {
         window.speechSynthesis.resume();
       }
-    }, 100);
+    }, 80);
   }, [isMuted, selectedVoice, pitch, rate]);
 
   const handleSend = React.useCallback(async (text: string) => {

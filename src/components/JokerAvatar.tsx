@@ -10,20 +10,20 @@ export default function JokerAvatar({ isTyping, isSpeaking }: JokerAvatarProps) 
   const avatarUrl = "https://i.ibb.co/SDb3KhJS/file-00000000bc08720c8e01d6949bca16d4.png";
 
   return (
-    <div className="relative w-48 h-48 md:w-56 md:h-56 mx-auto mb-8 flex items-center justify-center">
+    <div className="relative w-48 h-48 md:w-56 md:h-56 mx-auto mb-8 flex items-center justify-center select-none">
       
       {/* Background Glow Ring */}
       <motion.div
         animate={{
           scale: isSpeaking ? [1, 1.15, 1] : isTyping ? [1, 1.05, 1] : [1, 1.02, 1],
-          opacity: isSpeaking ? [0.6, 0.9, 0.6] : 0.4,
+          opacity: isSpeaking ? [0.6, 0.9, 0.6] : 0.35,
         }}
         transition={{
           duration: isSpeaking ? 1.2 : 3,
           repeat: Infinity,
           ease: "easeInOut"
         }}
-        className={`absolute inset-0 rounded-full blur-2xl transition-colors duration-500 pointer-events-none ${
+        className={`absolute -inset-4 rounded-full blur-2xl transition-colors duration-700 pointer-events-none ${
           isSpeaking
             ? "bg-green-500/30"
             : isTyping
@@ -102,7 +102,7 @@ export default function JokerAvatar({ isTyping, isSpeaking }: JokerAvatarProps) 
           />
           
           {/* Subtle noise / scanline overlay to keep it in theme */}
-          <div className="absolute inset-0 pointer-events-none bg-gradient-to-tr from-transparent via-purple-500/2 to-transparent mix-blend-overlay" />
+          <div className="absolute inset-0 pointer-events-none bg-gradient-to-tr from-transparent via-purple-500/5 to-transparent mix-blend-overlay" />
         </div>
 
         {/* Dynamic Speech Active Accent Glow */}
@@ -118,7 +118,7 @@ export default function JokerAvatar({ isTyping, isSpeaking }: JokerAvatarProps) 
         </AnimatePresence>
       </motion.div>
 
-      {/* Speech wave dots overlay on the side */}
+      {/* Typing Indicator */}
       <AnimatePresence>
         {isTyping && (
           <motion.div
